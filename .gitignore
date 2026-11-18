@@ -9,5 +9,6 @@
 /.clang-format
 /.clang-tidy
 **/.test
-/.appanalyzer/.superpowers
+/.appanalyzer
+/.superpowers
 tools/protocol-tests/.gen/
