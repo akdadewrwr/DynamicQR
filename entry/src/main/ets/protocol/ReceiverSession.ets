@@ -103,6 +103,7 @@ export class ReceiverSession {
   reset(): void {
     this.clearTransfer();
     this.scans = 0;
+    this.err = '';
   }
 
   private sameTransfer(f: Frame): boolean {
@@ -132,6 +133,7 @@ export class ReceiverSession {
     try {
       this.result = unpackBundle(bundle);
       this.st = SessionState.COMPLETE;
+      this.err = '';
     } catch (e) {
       this.fail('Invalid bundle: ' + (e as Error).message);
     }
@@ -155,7 +157,7 @@ export class ReceiverSession {
     this.unique = 0;
     this.startMs = 0;
     this.endMs = 0;
-    this.err = '';
+    // err is kept on purpose: a failure stays visible across the automatic restart (cleared by reset/success).
     this.result = [];
   }
 }

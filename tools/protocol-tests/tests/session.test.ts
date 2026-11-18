@@ -64,6 +64,25 @@ test('bundle CRC mismatch fails without exposing files, then restarts', () => {
   assert.ok(s.error().length > 0);
   s.onScan(enc.frame(0));
   assert.equal(s.state(), SessionState.RECEIVING);
+});
+
+test('the failure message stays visible after the automatic restart until reset or success', () => {
+  const bad = new TestEncoder(packBundle([bf('a.jpg', randomBytes(3000))]), 500, 5, 0x12345678);
+  const s = new ReceiverSession(() => 0);
+  for (let i = 0; i < bad.k; i++) s.onScan(bad.frame(i));
+  const message = s.error();
+  assert.ok(message.length > 0);
+  for (let i = 0; i < 3; i++) s.onScan(bad.frame(100 + i));   // scanning continues after the failure
+  assert.equal(s.state(), SessionState.RECEIVING);
+  assert.equal(s.error(), message);
+  s.reset();
+  assert.equal(s.error(), '');
+
+  const files = [bf('ok.jpg', randomBytes(2000))];
+  const good = new TestEncoder(packBundle(files), 500, 6);
+  for (let i = 0; i < bad.k; i++) s.onScan(bad.frame(i));
+  assert.ok(s.error().length > 0);
+  for (let i = 0; s.state() !== SessionState.COMPLETE; i++) s.onScan(good.frame(i));
   assert.equal(s.error(), '');
 });
 

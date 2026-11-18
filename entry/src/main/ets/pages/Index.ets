@@ -8,6 +8,7 @@ import { fileIo } from '@kit.CoreFileKit';
 import { image } from '@kit.ImageKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { BundleFile } from '../protocol/Bundle';
+import { galleryTitle } from '../protocol/Names';
 import { ReceiverSession, SessionProgress, SessionState } from '../protocol/ReceiverSession';
 
 const DOMAIN: number = 0xD0;
@@ -24,14 +25,6 @@ function formatClock(ms: number): string {
 
 function formatKb(bytes: number): string {
   return (bytes / 1024).toFixed(bytes < 10240 ? 1 : 0) + ' KB';
-}
-
-// Gallery title: file name without extension and without characters the media library rejects.
-function galleryTitle(name: string): string {
-  const dot = name.lastIndexOf('.');
-  const stem = dot > 0 ? name.substring(0, dot) : name;
-  const clean = stem.replace(/[\\/:*?"<>|.]/g, '_').trim();
-  return clean.length > 0 ? clean : 'DynamicQr';
 }
 
 class Thumb {
@@ -61,6 +54,9 @@ struct Index {
   private xController: XComponentController = new XComponentController();
   private surfaceId: string = '';
   private scanning: boolean = false;
+  private starting: boolean = false;
+  private restartPending: boolean = false;
+  private stopping: Promise<void> = Promise.resolve();
   private scanTimes: number[] = [];
   private ticker: number = -1;
 
@@ -106,9 +102,7 @@ struct Index {
     const atManager = abilityAccessCtrl.createAtManager();
     atManager.requestPermissionsFromUser(this.context(), [CAMERA])
       .then((r: PermissionRequestResult) => {
-        this.permissionGranted = r.authResults.length > 0 && r.authResults[0] === 0;
-        this.permissionDenied = !this.permissionGranted;
-        this.startScan();
+        this.onPermission(r.authResults.length > 0 && r.authResults[0] === 0);
       })
       .catch((e: BusinessError) => {
         hilog.error(DOMAIN, TAG, 'permission request failed: %{public}s', e.message);
@@ -116,7 +110,38 @@ struct Index {
       });
   }
 
+  // After a denial the system no longer shows the dialog, so ask through the permission settings sheet.
+  private requestCameraAgain(): void {
+    const atManager = abilityAccessCtrl.createAtManager();
+    atManager.requestPermissionOnSetting(this.context(), [CAMERA])
+      .then((statuses: Array<abilityAccessCtrl.GrantStatus>) => {
+        this.onPermission(statuses.length > 0 && statuses[0] === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED);
+      })
+      .catch((e: BusinessError) => {
+        hilog.error(DOMAIN, TAG, 'permission settings failed: %{public}s', e.message);
+        this.toast('Open Settings > Privacy > Camera and allow DynamicQr');
+      });
+  }
+
+  private onPermission(granted: boolean): void {
+    this.permissionGranted = granted;
+    this.permissionDenied = !granted;
+    this.startScan();
+  }
+
+  // Starts scanning once any previous stop/release has finished (avoids racing a late release).
   private startScan(): void {
+    if (this.scanning || this.starting) {
+      return;
+    }
+    this.starting = true;
+    this.stopping.then(() => {
+      this.starting = false;
+      this.startScanNow();
+    });
+  }
+
+  private startScanNow(): void {
     if (this.scanning || !this.permissionGranted || this.surfaceId === '' ||
       this.sessionState === SessionState.COMPLETE) {
       return;
@@ -152,11 +177,24 @@ struct Index {
       return;
     }
     this.scanning = false;
-    customScan.stop()
+    this.stopping = customScan.stop()
       .then(() => customScan.release())
       .catch((e: BusinessError) => {
         hilog.warn(DOMAIN, TAG, 'stop scan failed: %{public}s', e.message);
       });
+  }
+
+  // After a camera/scan error the stream may be dead: tear it down and start again shortly.
+  private restartScan(): void {
+    if (this.restartPending) {
+      return;
+    }
+    this.restartPending = true;
+    this.stopScan();
+    setTimeout(() => {
+      this.restartPending = false;
+      this.startScan();
+    }, 1000);
   }
 
   private onScanResult(err: BusinessError, results: Array<scanBarcode.ScanResult>): void {
@@ -165,6 +203,8 @@ struct Index {
     }
     if (err) {
       hilog.warn(DOMAIN, TAG, 'scan error %{public}d: %{public}s', err.code, err.message);
+      this.restartScan();
+      return;
     } else {
       const now = Date.now();
       for (let i = 0; i < results.length; i++) {
@@ -181,6 +221,7 @@ struct Index {
       customScan.rescan();
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'rescan failed: %{public}s', (e as BusinessError).message);
+      this.restartScan();
     }
   }
 
@@ -403,7 +444,7 @@ struct Index {
           Text('Camera permission is needed to receive images')
             .fontSize(16)
           Button('Allow camera')
-            .onClick(() => this.requestCamera())
+            .onClick(() => this.requestCameraAgain())
         }
         .padding(24)
       } else if (this.sessionState === SessionState.COMPLETE) {
