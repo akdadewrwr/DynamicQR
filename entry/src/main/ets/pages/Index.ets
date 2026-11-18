@@ -1,9 +1,12 @@
 import { base45Encode } from '../protocol/Base45';
 import { crc32 } from '../protocol/Crc';
 import { utf8Encode } from '../protocol/Utf8';
+import { ltNeighbors } from '../protocol/Prng';
+import { parseFrame } from '../protocol/Frame';
 
 // Temporary: references protocol modules so the ArkTS build type-checks them (replaced in Task 8).
-const PROTOCOL_CHECK: string = base45Encode(utf8Encode('x')) + crc32(new Uint8Array(1), 0, 1);
+const PROTOCOL_CHECK: string = base45Encode(utf8Encode('x')) + crc32(new Uint8Array(1), 0, 1) +
+  ltNeighbors(1, 2, 1, 1).length + (parseFrame('') === null);
 
 @Entry
 @Component

@@ -1,3 +1,4 @@
 entry/src/test/vectors/*.txt text eol=lf
 *.bin binary
 *.dll binary
+*.sh text eol=lf
