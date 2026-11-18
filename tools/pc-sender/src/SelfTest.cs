@@ -157,9 +157,99 @@ namespace DynamicQr
             return failures == 0;
         }
 
-        // Image preparation checks are added in Task 5.
+        private static string TempImage(System.Drawing.Bitmap bmp, System.Drawing.Imaging.ImageFormat fmt, string ext)
+        {
+            string path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dqr-selftest-" + Guid.NewGuid().ToString("N") + ext);
+            bmp.Save(path, fmt);
+            return path;
+        }
+
+        private static System.Drawing.Bitmap Decode(byte[] jpeg)
+        {
+            return new System.Drawing.Bitmap(new System.IO.MemoryStream(jpeg));
+        }
+
+        private static bool IsJpeg(byte[] b)
+        {
+            return b.Length > 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF;
+        }
+
         private static void ImageChecks()
         {
+            Check("large PNG with alpha -> 1280x960 JPEG on white", delegate
+            {
+                string path;
+                using (System.Drawing.Bitmap src = new System.Drawing.Bitmap(4000, 3000, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+                {
+                    using (System.Drawing.Graphics g = System.Drawing.Graphics.FromImage(src))
+                    {
+                        g.Clear(System.Drawing.Color.Transparent);
+                        g.FillRectangle(System.Drawing.Brushes.Red, 2000, 0, 2000, 3000);
+                    }
+                    path = TempImage(src, System.Drawing.Imaging.ImageFormat.Png, ".png");
+                }
+                try
+                {
+                    byte[] jpeg = ImagePrep.Prepare(path, 1280, 80);
+                    using (System.Drawing.Bitmap outBmp = Decode(jpeg))
+                    {
+                        System.Drawing.Color px = outBmp.GetPixel(100, 100);
+                        return IsJpeg(jpeg) && outBmp.Width == 1280 && outBmp.Height == 960 && px.R >= 250 && px.G >= 250 && px.B >= 250;
+                    }
+                }
+                finally { System.IO.File.Delete(path); }
+            });
+
+            Check("small image is not upscaled", delegate
+            {
+                string path;
+                using (System.Drawing.Bitmap src = new System.Drawing.Bitmap(800, 600)) path = TempImage(src, System.Drawing.Imaging.ImageFormat.Bmp, ".bmp");
+                try
+                {
+                    using (System.Drawing.Bitmap outBmp = Decode(ImagePrep.Prepare(path, 1280, 80))) return outBmp.Width == 800 && outBmp.Height == 600;
+                }
+                finally { System.IO.File.Delete(path); }
+            });
+
+            Check("EXIF orientation 6 is applied and metadata removed", delegate
+            {
+                string path;
+                using (System.Drawing.Bitmap src = new System.Drawing.Bitmap(400, 200))
+                {
+                    System.Drawing.Imaging.PropertyItem item = (System.Drawing.Imaging.PropertyItem)
+                        System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(System.Drawing.Imaging.PropertyItem));
+                    item.Id = 0x0112;
+                    item.Type = 3;
+                    item.Len = 2;
+                    item.Value = new byte[] { 6, 0 };
+                    src.SetPropertyItem(item);
+                    path = TempImage(src, System.Drawing.Imaging.ImageFormat.Jpeg, ".jpg");
+                }
+                try
+                {
+                    using (System.Drawing.Bitmap outBmp = Decode(ImagePrep.Prepare(path, 1280, 80)))
+                    {
+                        bool noOrientation = Array.IndexOf(outBmp.PropertyIdList, 0x0112) < 0;
+                        return outBmp.Width == 200 && outBmp.Height == 400 && noOrientation;
+                    }
+                }
+                finally { System.IO.File.Delete(path); }
+            });
+
+            Check("output names are .jpg and unique (case-insensitive)", delegate
+            {
+                HashSet<string> taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                string a = ImagePrep.OutputName(@"C:\x\a.png", taken);
+                string b = ImagePrep.OutputName(@"C:\y\A.jpg", taken);
+                string c = ImagePrep.OutputName(@"C:\z\a.bmp", taken);
+                return a == "a.jpg" && b == "A_2.jpg" && c == "a_3.jpg";
+            });
+
+            Check("supported extensions", delegate
+            {
+                return ImagePrep.IsSupported("x.JPG") && ImagePrep.IsSupported("x.tiff") && ImagePrep.IsSupported("x.gif")
+                    && !ImagePrep.IsSupported("x.webp") && !ImagePrep.IsSupported("x.heic") && !ImagePrep.IsSupported("x");
+            });
         }
     }
 }
