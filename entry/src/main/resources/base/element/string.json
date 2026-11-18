@@ -2,15 +2,19 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "module description"
+      "value": "Receive images from a PC via animated QR codes"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "description"
+      "value": "Receive images from a PC via animated QR codes"
     },
     {
       "name": "EntryAbility_label",
-      "value": "label"
+      "value": "DynamicQr"
+    },
+    {
+      "name": "camera_reason",
+      "value": "Scan the animated QR code shown on your PC"
     }
   ]
 }
