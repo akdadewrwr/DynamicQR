@@ -8,10 +8,10 @@ copy this whole folder (it includes `lib/QRCoder.dll`, MIT licence in `lib/QRCod
 
 - **Drag images onto `send.bat`**, or **double-click `send.bat`** and pick images.
 - A console lists each image after shrinking, the bundle size and an estimated time, then a
-  full-screen QR animation starts on the primary monitor.
+  window with the QR animation opens (maximized; resize or move it freely, the code rescales).
 - Open the app on the phone and point the camera at the screen. It can start at any moment.
 
-Keys in the animation window: `+` / `-` change speed (1-30 fps), `Space` pause, `Esc` quit.
+Keys in the animation window: `+` / `-` change speed (1-30 fps), `Space` pause, `F11` toggle full screen, `Esc` quit (or leave full screen).
 
 Accepted formats: JPG, PNG, BMP, GIF (first frame), TIFF. HEIC/WebP are skipped with a message.
 Each image is rotated per its EXIF orientation, shrunk to at most 1280 px on the long side, and

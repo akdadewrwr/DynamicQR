@@ -22,9 +22,9 @@ Inspired by [divan/txqr](https://github.com/divan/txqr), with a few changes: an 
 
 1. Copy the `tools/pc-sender` folder anywhere.
 2. **Drag images onto `send.bat`**, or double-click it and pick images.
-3. A console lists the images and an estimated time, then a full-screen QR animation starts.
+3. A console lists the images and an estimated time, then a window with the QR animation opens. Resize or move it as you like (the code rescales); `F11` toggles full screen.
 
-Keys in the animation window: `+` / `-` change speed, `Space` pause, `Esc` quit.
+Keys in the animation window: `+` / `-` change speed, `Space` pause, `F11` full screen, `Esc` quit.
 
 ### On the phone (HarmonyOS, API 24+)
 

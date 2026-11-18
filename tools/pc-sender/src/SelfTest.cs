@@ -153,9 +153,12 @@ namespace DynamicQr
 
             ImageChecks();
 
-            Check("window module size fills height minus status strip", delegate
+            Check("window module size fits the smaller of width and height minus status strip", delegate
             {
-                return SenderForm.ModulePixels(1080, 105) == 9 && SenderForm.ModulePixels(2160, 105) == 20 && SenderForm.ModulePixels(100, 105) == 1;
+                return SenderForm.ModulePixels(1920, 1080, 105) == 9      // landscape: height limits
+                    && SenderForm.ModulePixels(1080, 1920, 105) == 10     // portrait: width limits
+                    && SenderForm.ModulePixels(800, 600, 105) == 5        // small resized window
+                    && SenderForm.ModulePixels(100, 100, 105) == 1;       // never below 1 px
             });
             Check("fps is clamped to 1..30", delegate
             {

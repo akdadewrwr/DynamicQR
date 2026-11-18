@@ -35,9 +35,10 @@ namespace DynamicQr
             try { SetProcessDPIAware(); } catch (Exception) { }
         }
 
-        public static int ModulePixels(int clientHeight, int matrixSize)
+        // Integer module size (no blur) so the whole code fits the client area above the status strip.
+        public static int ModulePixels(int clientWidth, int clientHeight, int matrixSize)
         {
-            return Math.Max(1, (clientHeight - StatusHeight) / matrixSize);
+            return Math.Max(1, Math.Min(clientWidth, clientHeight - StatusHeight) / matrixSize);
         }
 
         public static int ClampFps(int value)
@@ -52,16 +53,18 @@ namespace DynamicQr
             this.fps = ClampFps(fps);
             summary = fileCount + (fileCount == 1 ? " file" : " files") + Dot + (bundleLen + 1023) / 1024 + " KB" + Dot + "K=" + enc.K;
 
+            // A normal, resizable window (starts maximized); F11 toggles borderless full screen.
             Text = "DynamicQr sender";
             BackColor = Color.White;
-            FormBorderStyle = FormBorderStyle.None;
-            StartPosition = FormStartPosition.Manual;
-            Bounds = Screen.PrimaryScreen.Bounds;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            StartPosition = FormStartPosition.CenterScreen;
+            Rectangle work = Screen.PrimaryScreen.WorkingArea;
+            Size = new Size(work.Width * 3 / 4, work.Height * 3 / 4);
+            MinimumSize = new Size(320, 320);
             WindowState = FormWindowState.Maximized;
-            TopMost = true;
             DoubleBuffered = true;
+            ResizeRedraw = true;
             KeyPreview = true;
-            Cursor.Hide();
 
             ShowFrame();
             timer.Interval = 1000 / this.fps;
@@ -91,11 +94,32 @@ namespace DynamicQr
                     paused = !paused;
                     Invalidate();
                     break;
+                case Keys.F11:
+                    ToggleFullScreen();
+                    break;
                 case Keys.Escape:
-                    Close();
+                    if (FormBorderStyle == FormBorderStyle.None) ToggleFullScreen();
+                    else Close();
                     break;
             }
             base.OnKeyDown(e);
+        }
+
+        private void ToggleFullScreen()
+        {
+            if (FormBorderStyle == FormBorderStyle.None)
+            {
+                FormBorderStyle = FormBorderStyle.Sizable;
+                WindowState = FormWindowState.Normal;
+                WindowState = FormWindowState.Maximized;
+            }
+            else
+            {
+                FormBorderStyle = FormBorderStyle.None;
+                WindowState = FormWindowState.Normal;
+                WindowState = FormWindowState.Maximized;
+            }
+            Invalidate();
         }
 
         private void SetFps(int value)
@@ -112,8 +136,8 @@ namespace DynamicQr
             if (matrix != null)
             {
                 int size = matrix.Count;
-                int px = ModulePixels(ClientSize.Height, size);
-                int left = (ClientSize.Width - size * px) / 2;
+                int px = ModulePixels(ClientSize.Width, ClientSize.Height, size);
+                int left = Math.Max(0, (ClientSize.Width - size * px) / 2);
                 int top = Math.Max(0, (ClientSize.Height - StatusHeight - size * px) / 2);
                 for (int y = 0; y < size; y++)
                 {
@@ -126,11 +150,13 @@ namespace DynamicQr
             }
             TimeSpan t = clock.Elapsed;
             string status = summary + Dot + "block " + blockId + Dot + fps + " fps" + (paused ? Dot + "PAUSED" : "") +
-                Dot + ((int)t.TotalMinutes).ToString("00") + ":" + t.Seconds.ToString("00") +
-                "     + / - speed" + Dot + "Space pause" + Dot + "Esc quit";
+                Dot + ((int)t.TotalMinutes).ToString("00") + ":" + t.Seconds.ToString("00");
+            string hints = "     + / - speed" + Dot + "Space pause" + Dot + "F11 full screen" + Dot + "Esc quit";
             using (Font font = new Font("Segoe UI", 11))
             {
-                SizeF sz = g.MeasureString(status, font);
+                SizeF sz = g.MeasureString(status + hints, font);
+                if (sz.Width <= ClientSize.Width) status += hints;   // hints only when they fit
+                else sz = g.MeasureString(status, font);
                 g.DrawString(status, font, Brushes.Gray, (ClientSize.Width - sz.Width) / 2, ClientSize.Height - StatusHeight + (StatusHeight - sz.Height) / 2);
             }
         }
@@ -138,7 +164,6 @@ namespace DynamicQr
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             timer.Stop();
-            Cursor.Show();
             base.OnFormClosed(e);
         }
     }

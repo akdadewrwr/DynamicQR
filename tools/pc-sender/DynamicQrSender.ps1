@@ -105,7 +105,7 @@ function Show-SenderWindow([byte[]]$Bundle, [int]$FileCount) {
     $enc = [DynamicQr.FrameEncoder]::new($Bundle, $BlockSize, [uint32](Get-TransferId))
     $level = [QRCoder.QRCodeGenerator+ECCLevel]::$Ecc
     $form = [DynamicQr.SenderForm]::new($enc, $Fps, $level, $FileCount, $Bundle.Length)
-    Write-Host 'Showing the QR animation. Keys: + / - speed, Space pause, Esc quit.'
+    Write-Host 'Showing the QR animation. Resize the window freely. Keys: + / - speed, Space pause, F11 full screen, Esc quit.'
     [System.Windows.Forms.Application]::Run($form)
 }
 
