@@ -45,7 +45,13 @@ function Write-DumpFrames([byte[]]$Bundle, [int]$Count, [string]$Path) {
 }
 
 function Show-SenderWindow([byte[]]$Bundle, [int]$FileCount) {
-    Write-Host 'The animation window is added in the next step.'
+    [DynamicQr.SenderForm]::EnableDpiAwareness()
+    [System.Windows.Forms.Application]::EnableVisualStyles()
+    $enc = [DynamicQr.FrameEncoder]::new($Bundle, $BlockSize, [uint32](Get-TransferId))
+    $level = [QRCoder.QRCodeGenerator+ECCLevel]::$Ecc
+    $form = [DynamicQr.SenderForm]::new($enc, $Fps, $level, $FileCount, $Bundle.Length)
+    Write-Host 'Showing the QR animation. Keys: + / - speed, Space pause, Esc quit.'
+    [System.Windows.Forms.Application]::Run($form)
 }
 
 Import-SenderCode

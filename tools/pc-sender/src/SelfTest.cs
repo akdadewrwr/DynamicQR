@@ -153,6 +153,15 @@ namespace DynamicQr
 
             ImageChecks();
 
+            Check("window module size fills height minus status strip", delegate
+            {
+                return SenderForm.ModulePixels(1080, 105) == 9 && SenderForm.ModulePixels(2160, 105) == 20 && SenderForm.ModulePixels(100, 105) == 1;
+            });
+            Check("fps is clamped to 1..30", delegate
+            {
+                return SenderForm.ClampFps(0) == 1 && SenderForm.ClampFps(31) == 30 && SenderForm.ClampFps(12) == 12;
+            });
+
             Console.WriteLine(failures == 0 ? "SELFTEST PASS" : "SELFTEST FAIL (" + failures + ")");
             return failures == 0;
         }
