@@ -4,6 +4,10 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { display, window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { customScan, scanBarcode, scanCore } from '@kit.ScanKit';
+import { fileIo } from '@kit.CoreFileKit';
+import { image } from '@kit.ImageKit';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
+import { BundleFile } from '../protocol/Bundle';
 import { ReceiverSession, SessionProgress, SessionState } from '../protocol/ReceiverSession';
 
 const DOMAIN: number = 0xD0;
@@ -22,6 +26,24 @@ function formatKb(bytes: number): string {
   return (bytes / 1024).toFixed(bytes < 10240 ? 1 : 0) + ' KB';
 }
 
+// Gallery title: file name without extension and without characters the media library rejects.
+function galleryTitle(name: string): string {
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.substring(0, dot) : name;
+  const clean = stem.replace(/[\\/:*?"<>|.]/g, '_').trim();
+  return clean.length > 0 ? clean : 'DynamicQr';
+}
+
+class Thumb {
+  name: string;
+  pixelMap: image.PixelMap | null;
+
+  constructor(name: string, pixelMap: image.PixelMap | null) {
+    this.name = name;
+    this.pixelMap = pixelMap;
+  }
+}
+
 @Entry
 @Component
 struct Index {
@@ -33,6 +55,8 @@ struct Index {
   @State errorText: string = '';
   @State previewWidth: number = 360;
   @State previewHeight: number = 640;
+  @State thumbs: Thumb[] = [];
+  @State viewerIndex: number = -1;
   private session: ReceiverSession = new ReceiverSession(() => Date.now());
   private xController: XComponentController = new XComponentController();
   private surfaceId: string = '';
@@ -167,8 +191,75 @@ struct Index {
     }
     this.scanRate = this.scanTimes.length * 1000 / RATE_WINDOW_MS;
     this.progress = this.session.progress();
+    const previous = this.sessionState;
     this.sessionState = this.session.state();
     this.errorText = this.session.error();
+    if (previous !== SessionState.COMPLETE && this.sessionState === SessionState.COMPLETE) {
+      this.loadThumbs(this.session.files());
+    }
+  }
+
+  private async loadThumbs(files: BundleFile[]): Promise<void> {
+    const result: Thumb[] = [];
+    for (let i = 0; i < files.length; i++) {
+      let pm: image.PixelMap | null = null;
+      try {
+        const buf = files[i].data.buffer.slice(files[i].data.byteOffset, files[i].data.byteOffset + files[i].data.byteLength);
+        const source = image.createImageSource(buf as ArrayBuffer);
+        pm = await source.createPixelMap();
+        await source.release();
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, 'cannot decode %{public}s', files[i].name);
+      }
+      result.push(new Thumb(files[i].name, pm));
+    }
+    this.thumbs = result;
+  }
+
+  private releaseThumbs(): void {
+    for (let i = 0; i < this.thumbs.length; i++) {
+      const pm = this.thumbs[i].pixelMap;
+      if (pm !== null) {
+        pm.release();
+      }
+    }
+    this.thumbs = [];
+    this.viewerIndex = -1;
+  }
+
+  private async saveAll(): Promise<void> {
+    const files = this.session.files();
+    const helper = photoAccessHelper.getPhotoAccessHelper(this.context());
+    let saved = 0;
+    let lastError = '';
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const options: photoAccessHelper.CreateOptions = { title: galleryTitle(files[i].name) };
+        const uri = await helper.createAsset(photoAccessHelper.PhotoType.IMAGE, 'jpg', options);
+        const file = fileIo.openSync(uri, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE);
+        try {
+          const d = files[i].data;
+          fileIo.writeSync(file.fd, d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength) as ArrayBuffer);
+        } finally {
+          fileIo.closeSync(file);
+        }
+        saved++;
+      } catch (e) {
+        lastError = (e as BusinessError).message;
+        hilog.error(DOMAIN, TAG, 'save %{public}s failed: %{public}s', files[i].name, lastError);
+      }
+    }
+    const message = lastError === '' ? 'Saved ' + saved + ' images to the gallery' :
+      'Saved ' + saved + ' of ' + files.length + ' images. Error: ' + lastError;
+    this.toast(message);
+  }
+
+  private toast(message: string): void {
+    try {
+      this.getUIContext().getPromptAction().showToast({ message: message, duration: 3000 });
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'toast failed: %{public}s', message);
+    }
   }
 
   private resetSession(): void {
@@ -176,6 +267,7 @@ struct Index {
       // The preview XComponent is rebuilt when the results view closes; its onLoad starts scanning.
       this.surfaceId = '';
     }
+    this.releaseThumbs();
     this.session.reset();
     this.scanTimes = [];
     this.refresh();
@@ -229,18 +321,79 @@ struct Index {
 
   @Builder
   ResultsPanel() {
-    Column({ space: 12 }) {
-      Text('✓ Verified · ' + formatKb(this.progress.bundleLen) + ' · ' +
-        (this.progress.elapsedMs / 1000).toFixed(1) + ' s')
-        .fontSize(20)
-        .fontWeight(FontWeight.Medium)
-      Text(this.session.files().length + ' images received')
-        .fontSize(16)
-      Button('Scan again')
-        .onClick(() => this.resetSession())
+    Stack() {
+      Column({ space: 12 }) {
+        Text('✓ ' + this.session.files().length + ' images · ' + formatKb(this.progress.bundleLen) + ' · ' +
+          (this.progress.elapsedMs / 1000).toFixed(1) + ' s')
+          .fontSize(20)
+          .fontWeight(FontWeight.Medium)
+        Grid() {
+          ForEach(this.thumbs, (t: Thumb, i: number) => {
+            GridItem() {
+              Column({ space: 4 }) {
+                if (t.pixelMap !== null) {
+                  Image(t.pixelMap)
+                    .width('100%')
+                    .aspectRatio(1)
+                    .objectFit(ImageFit.Cover)
+                    .borderRadius(6)
+                } else {
+                  Text('can\'t display')
+                    .width('100%')
+                    .aspectRatio(1)
+                    .textAlign(TextAlign.Center)
+                    .fontSize(12)
+                    .backgroundColor(Color.Gray)
+                    .borderRadius(6)
+                }
+                Text(t.name)
+                  .fontSize(11)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+              }
+              .onClick(() => {
+                if (t.pixelMap !== null) {
+                  this.viewerIndex = i;
+                }
+              })
+            }
+          }, (t: Thumb, i: number) => i + ':' + t.name)
+        }
+        .columnsTemplate('1fr 1fr 1fr')
+        .columnsGap(8)
+        .rowsGap(8)
+        .layoutWeight(1)
+        Row({ space: 12 }) {
+          SaveButton({ icon: SaveIconStyle.FULL_FILLED, text: SaveDescription.SAVE_TO_GALLERY,
+            buttonType: ButtonType.Capsule })
+            .onClick((event: ClickEvent, result: SaveButtonOnClickResult) => {
+              if (result === SaveButtonOnClickResult.SUCCESS) {
+                this.saveAll();
+              } else {
+                this.toast('Saving was not allowed');
+              }
+            })
+          Button('Scan again')
+            .onClick(() => this.resetSession())
+        }
+      }
+      .padding(16)
+      .width('100%')
+      .height('100%')
+
+      if (this.viewerIndex >= 0 && this.viewerIndex < this.thumbs.length) {
+        Image(this.thumbs[this.viewerIndex].pixelMap)
+          .width('100%')
+          .height('100%')
+          .objectFit(ImageFit.Contain)
+          .backgroundColor(Color.Black)
+          .onClick(() => {
+            this.viewerIndex = -1;
+          })
+      }
     }
-    .padding(16)
     .width('100%')
+    .height('100%')
   }
 
   build() {
