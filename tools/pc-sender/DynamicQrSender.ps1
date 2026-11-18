@@ -12,11 +12,66 @@ param(
     [int]$DumpFrames = 0,
     [string]$Out,
     [string]$TransferId,
-    [switch]$SelfTest
+    [switch]$SelfTest,
+    [switch]$FromCmdLine
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
+
+# Splits the raw cmd.exe command line (env DQR_CMDLINE, set by send.bat) into the arguments that followed
+# the .bat path. Quoted segments keep spaces; everything else (including & ^ ( ) [ ] ') is taken literally.
+function Split-LauncherArgs([string]$CmdLine, [string]$BatPath) {
+    $name = [System.IO.Path]::GetFileName($BatPath)
+    $at = $CmdLine.IndexOf($BatPath, [System.StringComparison]::OrdinalIgnoreCase)
+    $len = $BatPath.Length
+    if ($at -lt 0) {
+        $at = $CmdLine.IndexOf($name, [System.StringComparison]::OrdinalIgnoreCase)
+        $len = $name.Length
+    }
+    if ($at -lt 0) { return @() }
+    $rest = $CmdLine.Substring($at + $len)
+    if ($rest.StartsWith('"')) { $rest = $rest.Substring(1) }
+    $tokens = New-Object System.Collections.Generic.List[string]
+    $sb = New-Object System.Text.StringBuilder
+    $inQuotes = $false
+    foreach ($ch in $rest.ToCharArray()) {
+        if ($ch -eq '"') { $inQuotes = -not $inQuotes; continue }
+        if (-not $inQuotes -and [char]::IsWhiteSpace($ch)) {
+            if ($sb.Length -gt 0) { $tokens.Add($sb.ToString()); [void]$sb.Clear() }
+            continue
+        }
+        [void]$sb.Append($ch)
+    }
+    if ($sb.Length -gt 0) { $tokens.Add($sb.ToString()) }
+    $clean = @($tokens | ForEach-Object { $_.Trim() } | Where-Object { $_.Length -gt 0 })
+    return , $clean
+}
+
+# Turns launcher tokens into named parameters for this script (array splatting would treat "-Fps" as a file).
+function ConvertTo-SenderParams([string[]]$Tokens) {
+    $switches = @('SelfTest')
+    $valued = @('MaxSide', 'Quality', 'BlockSize', 'Fps', 'Ecc', 'DumpFrames', 'Out', 'TransferId')
+    $params = @{}
+    $fileList = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $Tokens.Count; $i++) {
+        $t = $Tokens[$i]
+        $name = if ($t.StartsWith('-')) { $t.Substring(1) } else { '' }
+        $sw = @($switches | Where-Object { $_ -ieq $name })
+        $val = @($valued | Where-Object { $_ -ieq $name })
+        if ($sw.Count -eq 1) { $params[$sw[0]] = $true }
+        elseif ($val.Count -eq 1 -and $i + 1 -lt $Tokens.Count) { $params[$val[0]] = $Tokens[++$i] }
+        else { $fileList.Add($t) }
+    }
+    if ($fileList.Count -gt 0) { $params['Files'] = $fileList.ToArray() }
+    return $params
+}
+
+if ($FromCmdLine) {
+    $launcherParams = ConvertTo-SenderParams (Split-LauncherArgs $env:DQR_CMDLINE $env:DQR_BAT)
+    & $PSCommandPath @launcherParams
+    exit $LASTEXITCODE
+}
 
 function Import-SenderCode {
     $qrDll = Join-Path $PSScriptRoot 'lib\QRCoder.dll'
